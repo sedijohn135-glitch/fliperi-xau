@@ -88,6 +88,30 @@ def resolve_money_scale(configured: Optional[float], samples: Sequence[float]) -
     )
 
 
+def normalize_price(raw: Optional[float], scale: Scale,
+                    sane_min: float, sane_max: float) -> Optional[float]:
+    """Unscale a price only if it actually needs it.
+
+    The server is not consistent: ``get_spot_prices`` and ``get_trendbars``
+    return integers scaled by 1e5, while ``get_positions`` returns prices
+    already in human units. Dividing those a second time turned an 79,851.50
+    entry into 0.80 - three different levels all collapsing onto the same
+    number, which is what gave it away.
+
+    So the value decides. If it is already inside the instrument's plausible
+    band it is taken as-is; otherwise the detected scale is applied. That is
+    self-correcting whichever convention a given payload happens to use.
+    """
+    if raw is None:
+        return None
+    value = float(raw)
+    if value == 0.0:
+        return 0.0
+    if sane_min <= abs(value) <= sane_max:
+        return value
+    return scale.apply(value)
+
+
 def round_to_step(value: float, step: float, *, mode: str = "down") -> float:
     """Round ``value`` onto the broker's volume grid.
 

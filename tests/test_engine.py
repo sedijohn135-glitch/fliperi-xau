@@ -170,3 +170,17 @@ def test_only_stop_orders_count_as_the_reverse_pending():
 
 def test_the_engine_never_starts_itself():
     assert engine_with([]).running is False
+
+
+def test_position_prices_are_not_unscaled_twice():
+    """Positions come back in human units; spot prices come back x1e5.
+
+    This matters more here than anywhere: basket_pnl() falls back to entry
+    prices whenever the broker reports no per-position profit, so a mis-scaled
+    entry would size the next martingale rung off a fictional loss.
+    """
+    b = broker()
+    for real in (79_851.50, 79_922.89, 4_431.23):
+        assert b._account_price(real) == pytest.approx(real)
+    assert b._account_price(7_985_150_000) == pytest.approx(79_851.50)
+    assert b._account_price(None) is None

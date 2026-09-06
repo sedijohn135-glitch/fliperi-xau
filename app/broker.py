@@ -36,7 +36,9 @@ from mcp_client.schema import (
 from mcp_client.transport import MCPConnection
 from models import PendingOrder, Position, SymbolInfo
 from utils.logging import get_logger
-from utils.prices import Scale, resolve_money_scale, resolve_price_scale, round_to_step
+from utils.prices import (
+    Scale, normalize_price, resolve_money_scale, resolve_price_scale, round_to_step,
+)
 
 log = get_logger("broker")
 
@@ -232,6 +234,18 @@ class Broker:
             raise ToolCallError(f"Balance payload had no balance field: {record}")
         self.balance = balance
 
+    def _account_price(self, raw: Optional[float]) -> Optional[float]:
+        """A price read back from a position or an order.
+
+        The server is not consistent about scaling: spot prices and trendbars
+        come as integers x1e5, but positions come already in human units.
+        Dividing those again turned a 79,851.50 entry into 0.80 - and for this
+        bot that is not cosmetic, because basket_pnl() falls back to entry
+        prices whenever the broker does not report a per-position profit.
+        """
+        return normalize_price(raw, self.price_scale,
+                               self._cfg.sane_price_min, self._cfg.sane_price_max)
+
     def _is_ours(self, label: str) -> bool:
         return bool(label) and self._cfg.label in label
 
@@ -248,10 +262,10 @@ class Broker:
                 symbol_name=str(pick(record, "symbolName", "symbol", default="")),
                 side=normalize_side(pick(record, "tradeSide", "side", "direction")),
                 volume=self.wire_to_lots(as_float(pick(record, "volume", "lots"), 0.0) or 0.0),
-                entry_price=self.price_scale.apply(
+                entry_price=self._account_price(
                     as_float(pick(record, "entryPrice", "openPrice", "price"), None)),
-                stop_loss=self.price_scale.apply(as_float(pick(record, "stopLoss"), None)),
-                take_profit=self.price_scale.apply(as_float(pick(record, "takeProfit"), None)),
+                stop_loss=self._account_price(as_float(pick(record, "stopLoss"), None)),
+                take_profit=self._account_price(as_float(pick(record, "takeProfit"), None)),
                 label=str(pick(record, "label", "comment", default="")),
                 open_time=parse_timestamp(pick(record, "openTimestamp", "openTime")),
                 profit=self.money_scale.apply(
@@ -273,10 +287,10 @@ class Broker:
                 symbol_name=str(pick(record, "symbolName", "symbol", default="")),
                 side=normalize_side(pick(record, "tradeSide", "side", "direction")),
                 volume=self.wire_to_lots(as_float(pick(record, "volume", "lots"), 0.0) or 0.0),
-                price=self.price_scale.apply(
+                price=self._account_price(
                     as_float(pick(record, "stopPrice", "limitPrice", "price"), None)),
                 order_type=str(pick(record, "orderType", "type", default="")),
-                stop_loss=self.price_scale.apply(as_float(pick(record, "stopLoss"), None)),
+                stop_loss=self._account_price(as_float(pick(record, "stopLoss"), None)),
                 label=str(pick(record, "label", "comment", default="")),
                 raw=record if isinstance(record, dict) else {},
             ))
